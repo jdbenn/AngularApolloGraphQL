@@ -1,9 +1,6 @@
 # Angular Subscription Management with GraphQL APIs
 
 
-
-
-
 ## Background
 
 Some background on the technology involved to level set the audience.  
@@ -557,9 +554,3 @@ this.apollo.create({
 
 ## Conclusion
 
-Subscribing to observables in Angular, particularly with GraphQL using AWS AppSync and Apollo, involves understanding both Angular’s reactive programming model and efficient data management practices. By using the `async` pipe for template subscriptions, managing manual subscriptions carefully, and leveraging Apollo’s features like refetching and caching, you can ensure that your application remains performant and maintainable.
-
-Remember to always handle errors gracefully, avoid memory leaks by unsubscribing from observables, and optimize both your queries and rendering strategies. With these best practices, you’ll be well-equipped to build responsive, real-time applications with Angular and GraphQL.
-
-Happy coding!#   A n g u l a r A p o l l o G r a p h Q L  
- 
