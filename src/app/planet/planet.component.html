@@ -1,0 +1,17 @@
+<button (click)="addPlanet()"></button>
+
+@if((planets$ | async); as planets) {
+    <table>
+        <th>Name</th>
+        <th>Avg Temp</th>
+        <th>Habitable</th>
+
+        @for (planet of planets; track $index) {
+            <tr>
+                <td>{{planet.name}}</td>
+                <td>{{planet.avgTemp}}</td>
+                <td>{{planet.habitable}}</td>
+            </tr>
+        }
+    </table>
+}

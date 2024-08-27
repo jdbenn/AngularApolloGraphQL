@@ -7,5 +7,6 @@ export interface Hero {
 
 export interface Planet {
     name: string;
-    climate: string;
+    avgTemp: string;
+    habitable: string;
 }

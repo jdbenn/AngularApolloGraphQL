@@ -1,5 +1,10 @@
 # Angular Subscription Management with GraphQL APIs
 
+I recently found myself working on an account using a technology stack you don't often find together (at least it is not as popular).  This client is building an application using Angular with a dotnet backend that uses Hot Chocolate to expose a GraphQL api.  
+
+GraphQL is really popular.  Especially amount the React community.  More often than not Angular will connect with simple REST APIs (event OData).  There is support for GraphQL and Angular through an open source project called Apollo.  
+
+Working on this project, I noticed few things that could turn into problems in the form of memory leaks and performance in general because of some nuanced differences in the library used to integrate with the GraphQL endpoint and a traditional HttpClient implementation.  
 
 ## Background
 
@@ -184,7 +189,7 @@ It is this subscription management that will be the bulk of this article.
 
 The app will use a library called [Apollo](https://the-guild.dev/graphql/apollo-angular/docs).  The library is used to interact with GraphQL APIs.  
 
-The Apollow library does a lot for clients.  It has built in caching and automtic re-fetching during mutations to keep front end applications fast and in sync with backend.  
+The Apollo library does a lot for clients.  It has built in caching and automtic re-fetching during mutations to keep front end applications fast and in sync with backend.  
 
 Recall what a query to a GraphQL API looks like from above.  Using the Apollo library, it looks something like this:
 
@@ -284,16 +289,16 @@ So now we have a new variable **planets** that is retrieved by the planetReposit
 
 For whatever reason we couldn't use the view to subscribe to the observable (I'm sure there was a good reason).  
 
-So we use the Angular lifecycle hook onInit to manually subscribe and set the backing variable.  
+So we use the Angular lifecycle hook onInit to manually subscribe and set the backing planets variable.  
 
-The most important part here is introduction of a instance Subject to the component.  A subject is special kind of observable in that it is **WRITABLE**.  In our planets subscrption we will take all emitted values until _this_ (the component) is destroyed. 
+The most important part here is introduction of a instance Subject to the component.  A subject is special kind of observable in that it is **WRITABLE**.  In our planets subscrption we will take all emitted values until _this_ (the component) is destroyed.  The way that notification occurs is by subscribing to the subject:
 
 ```ts
-      this.planetRepository.getAllPlanets()
+    this.planetRepository.getAllPlanets()
       .pipe(
         takeUntil(this.destroy$),
         tap((planets) => this.planets = planets)
-      ).subscribe()
+    ).subscribe()
 ```
 
 Using the angular lifecycle hooks again, we call the next method on the subject to so anything subscribing will be unsubscribed.  
@@ -304,253 +309,313 @@ Using the angular lifecycle hooks again, we call the next method on the subject 
   }
 ```
 
-### Installation
+## Angular HttpClient
 
-First, install the necessary packages:
+Taking a step back for a minute, one important note to mention is the observable that is returned from the Angular HttpClient.  This class is a feature offered by Angular that does exactly what it sounds like.
 
-```bash
-npm install @apollo/client @apollo/angular graphql
-```
+All GETs, POSTS, PUTS, DELETES, etc and the corresponding responses are wrapped in an observable stream that must be subscribed to in order to actually make the calls.  
 
-Then, configure the Apollo client in your Angular application. You’ll need to set up an Apollo module with the AWS AppSync endpoint.
+The difference between the observable returned by the Angular HttpClient and other observable streams is that the HttpClient **AUTOMATICALLY** unusbscribes when the response is received from the server or the request times out.  
 
-### Apollo Client Configuration
+From the Angular docs:
 
-Create a file `app.module.ts` and configure the Apollo client:
+_In general, you should unsubscribe from an observable when a component is destroyed.
+You don't have to unsubscribe from HttpClient observables because they unsubscribe automatically after the server request responds or times out. Most developers choose not to unsubscribe._
 
-```typescript
-import { NgModule } from '@angular/core';
-import { BrowserModule } from '@angular/platform-browser';
-import { HttpLinkModule, HttpLink } from 'apollo-angular-link-http';
-import { InMemoryCache } from '@apollo/client/core';
-import { ApolloModule, Apollo } from 'apollo-angular';
-import { AppComponent } from './app.component';
-import { environment } from '../environments/environment';
+Often than not you will find code that looks like this:
 
-@NgModule({
-  declarations: [AppComponent],
-  imports: [
-    BrowserModule,
-    ApolloModule,
-    HttpLinkModule
-  ],
-  providers: [],
-  bootstrap: [AppComponent]
-})
-export class AppModule {
-  constructor(private apollo: Apollo, private httpLink: HttpLink) {
-    const uri = environment.appSyncUrl; // Your AppSync endpoint
-    const link = httpLink.create({ uri });
-
-    this.apollo.create({
-      link,
-      cache: new InMemoryCache()
-    });
+```ts
+  onInit() {
+    this.hero$ = this.route.params
+      .pipe(
+        tap((params:any) => {
+          this.heroId = params['id'];
+          this.heroRepository.getHero(this.heroId))
+            .pipe(
+              tap((hero:Hero) => this.hero = hero)
+            ).subscribe()
+          })
+      )
   }
-}
 ```
 
-Ensure `environment.appSyncUrl` contains your AWS AppSync GraphQL endpoint.
+The 2 subscriptions here will be handled by the view template (hero$), which wil be automatically subscribed and destroyed with the lifecycle of the component.  
 
-## Best Practices for Subscribing to Observables
-
-When working with observables, especially with subscriptions, it's crucial to follow best practices to ensure performance and maintainability.
-
-### 1. **Use the Async Pipe for Template Subscriptions**
-
-The `async` pipe is one of the most effective tools for managing observable subscriptions in Angular templates. It automatically subscribes to the observable and updates the view with the latest data. It also handles unsubscription when the component is destroyed, thus preventing memory leaks.
-
-Example:
 
 ```html
-<div *ngIf="data$ | async as data">
-  <p>{{ data.someField }}</p>
-</div>
+@if((heroId$ | async) && (hero$ | async); as hero) {
+
+    <p>{{hero.name}} </p>
+}
 ```
 
-In this example, `data$` is an observable that emits data. The `async` pipe subscribes to `data$` and handles unsubscription automatically.
+The other subscription to the heroRepository is manual without ever unsubscribing:
 
-### 2. **Manual Subscription Management**
+```ts
+  this.heroRepository.getHero(this.heroId))
+    .pipe(
+          tap((hero:Hero) => this.hero = hero)
+         ).subscribe()
+  })
+```
 
-While the `async` pipe is convenient, there are scenarios where manual subscription is necessary, especially when you need to perform side effects or handle complex logic.
+This will not cause any harm if we know that the actual class making the calls in the hero repository is the HttpClient.  My opinion would be to handle the subscription anyway for clarity and future proofing.  There is nothing wrong with explicitly handling the subscription (use the _async_ pipe or _takeUntil_).
 
-Example:
-
-```typescript
-import { Component, OnDestroy } from '@angular/core';
-import { Subscription } from 'rxjs';
-import { Apollo } from 'apollo-angular';
-import gql from 'graphql-tag';
-
-const SUBSCRIBE_TO_DATA = gql`
-  subscription OnDataChanged {
-    dataChanged {
-      id
-      value
-    }
+```ts
+  ngOnInit(): void {
+    this.heroId$ = this.route.params
+      .pipe(
+        filter((param:any) => param['id'] !== null),
+        map((param:any) => param['id']),
+        tap((heroId:string) => this.hero$ = this.heroRepository.getHero(heroId))
+      );
   }
-`;
+```
 
-@Component({
-  selector: 'app-data',
-  templateUrl: './data.component.html'
+
+## Apollo Is Not the Angular HttpClient
+
+The Apollo client observables returned by either a query, mutatation or watch query are **NOT** automatically unsubscribed.  You have to manage the subscriptions.  
+
+The subscription to querys or a watchQuery with Apollo can usually be handled with one of the two approaches previously mentiond.  A typical flow will be to initialize the component, subscribe to an Apollo query and render the template once the data is emitted to the observable.  
+
+Generally speaking the data is not going to change again (unless it was a websocket connection) and the subscription will stay alive with the component.  
+
+Using the planet repository example, let's assume we had a simple list view that showed all of the planets we have saved in the backend. 
+
+![Planet List](/assets/PlanetList.png)
+
+In order to get data on this view we use the [PlanetRepository](./src/app/planet-repository.service.ts).
+
+```ts
+@Injectable({
+  providedIn: 'root'
 })
-export class DataComponent implements OnDestroy {
-  private subscription: Subscription;
-  public data: any;
+export class PlanetRepositoryService {
 
-  constructor(private apollo: Apollo) {
-    this.subscription = this.apollo.subscribe({
-      query: SUBSCRIBE_TO_DATA
-    }).subscribe(result => {
-      this.data = result.data;
-    });
+  constructor(private apollo:Apollo) { }
+
+  getAllPlanets() : Observable<Planet[]> {
+    return this.apollo.watchQuery({
+      query: GET_ALL_PLANETS
+    }).valueChanges.pipe(
+      filter((response) => response.data != null),
+      map((response) => response.data as Planet[])
+    )
   }
+  
+}
+```
+The repository is injected into the [PlanetComponent](/src/app/planet//planet.component.ts) and the subscription handled by the view as we have done previously.
 
-  ngOnDestroy() {
-    if (this.subscription) {
-      this.subscription.unsubscribe();
+
+```ts
+@Component({
+  selector: 'app-planet',
+  standalone: true,
+  imports: [
+    CommonModule
+  ],
+  templateUrl: './planet.component.html',
+  styleUrl: './planet.component.scss'
+})
+export class PlanetComponent implements OnInit {
+
+    protected planets$: Observable<Planet[]> | null = null;
+
+    constructor(private planetRepository: PlanetRepositoryService) {
+
     }
+  ngOnInit(): void {
+    throw new Error('Method not implemented.');
   }
 }
 ```
 
-In this example, we manually subscribe to the `SUBSCRIBE_TO_DATA` GraphQL subscription and handle data updates. We also unsubscribe in `ngOnDestroy` to avoid memory leaks.
+```html
+@if((planets$ | async); as planets) {
+    <table>
+        <th>Name</th>
+        <th>Avg Temp</th>
+        <th>Habitable</th>
 
-### 3. **Avoid Memory Leaks**
-
-Memory leaks can occur if subscriptions are not properly managed. When manually subscribing, always ensure that you unsubscribe in the component’s `ngOnDestroy` lifecycle hook. This practice prevents the subscription from continuing after the component is destroyed.
-
-### 4. **Debounce and Throttle Subscriptions**
-
-In scenarios where subscriptions emit frequently, consider debouncing or throttling to manage performance. This helps to avoid unnecessary rendering or processing.
-
-Example:
-
-```typescript
-import { debounceTime } from 'rxjs/operators';
-
-// Inside your subscription
-this.apollo.subscribe({
-  query: SUBSCRIBE_TO_DATA
-}).pipe(
-  debounceTime(300) // Adjust the time as needed
-).subscribe(result => {
-  this.data = result.data;
-});
+        @for (planet of planets; track $index) {
+            <tr>
+                <td>{{planet.name}}</td>
+                <td>{{planet.avgTemp}}</td>
+                <td>{{planet.habitable}}</td>
+            </tr>
+        }
+    </table>
+}
 ```
 
-### 5. **Use Refetch Queries to Update Data**
+We also have the ability to add a planet and this is where 1. the cool stuff of Apollo really shine and 2. one needs to be aware of subscription management.  
 
-When using mutations that affect the data displayed in your application, use refetch queries to update the data after a mutation. This ensures that your data stays consistent with the backend.
+### Apollo Mutations
 
-Example:
+Apollo mutations also return an observable that needs to be subscribed to in order to make api call and receive data.  
 
-```typescript
-import { Component } from '@angular/core';
-import { Apollo } from 'apollo-angular';
-import gql from 'graphql-tag';
-import { BehaviorSubject } from 'rxjs';
+An implementation of adding a planet via the [PlanetRepository](/src/app/planet-repository.service.ts):
 
-const MUTATE_DATA = gql`
-  mutation UpdateData($id: ID!, $value: String!) {
-    updateData(id: $id, value: $value) {
-      id
-      value
-    }
+```ts
+  addPlanet(planet:Planet): Observable<Planet> {
+    return this.apollo
+      .mutate<Planet>({
+        mutation: ADD_PLANET,
+        variables: { planet },
+        refetchQueries: [
+          GET_ALL_PLANETS
+        ]
+      }).pipe(
+        filter((result:MutationResult<Planet>) => result.data != null),
+        map((result: MutationResult<Planet>) => result.data as Planet)
+      )
   }
-`;
+  ```
 
-const REFETCH_DATA = gql`
-  query GetData {
-    data {
-      id
-      value
-    }
-  }
-`;
+If you are not famailar with GraphQL - a mutation is the CUD of CRUD - adds, saves and deletes.  
 
+This method looks pretty straight forward, specify the mutation, include variables and return the response.  
+
+What makes Apollo slick is the local caching.  When the component was first loaded up, the getAllPlanets was subscribed to in the view template.  This resulted in the data being cached by the Apollo client.  
+
+With the mutation - we are creating a difference between what is on the server and what we have locally - so the local cache needs to be updated.
+
+That is what the refetchQueries will do for us; making an api call and publishing new values to the observable stream the component is already subscribed to.  
+
+```ts
 @Component({
-  selector: 'app-update-data',
-  templateUrl: './update-data.component.html'
+  selector: 'app-planet',
+  standalone: true,
+  imports: [
+    CommonModule
+  ],
+  templateUrl: './planet.component.html',
+  styleUrl: './planet.component.scss'
 })
-export class UpdateDataComponent {
-  private refetchSubject = new BehaviorSubject<void>(undefined);
+export class PlanetComponent implements OnInit {
 
-  constructor(private apollo: Apollo) {}
+    protected planets$: Observable<Planet[]> | null = null;
 
-  updateData(id: string, value: string) {
-    this.apollo.mutate({
-      mutation: MUTATE_DATA,
-      variables: { id, value },
-      refetchQueries: [{ query: REFETCH_DATA }]
-    }).subscribe({
-      next: (result) => console.log('Mutation successful', result),
-      error: (error) => console.error('Error during mutation', error)
-    });
+    constructor(private planetRepository: PlanetRepositoryService) {
+
+    }
+  ngOnInit(): void {
+    this.planets$ = this.planetRepository.getAllPlanets();
+  }
+
+  addPlanet() {
+    const planet: Planet = {
+      name: 'Earth',
+      avgTemp: '65',
+      habitable: 'yes'
+    }
+    this.planetRepository.addPlanet(planet).subscribe()
   }
 }
 ```
 
-In this example, after performing a mutation, the `refetchQueries` option ensures that the `GetData` query is executed again to refresh the data.
+Apollo will call _GET_ALL_PLANETS_ after the mutation is complete, the _planets$_ observable will receive new values and the view template will be updated with the new planet.  All without us having manage that.
 
-### 6. **Error Handling**
+There is a problem though.  Subscription resulting from the "addPlanet" on the Planet Repository. 
 
-Always implement error handling in your subscriptions to gracefully handle failures.
-
-Example:
-
-```typescript
-this.apollo.subscribe({
-  query: SUBSCRIBE_TO_DATA
-}).subscribe({
-  next: (result) => {
-    this.data = result.data;
-  },
-  error: (error) => {
-    console.error('Subscription error', error);
-    // Handle error appropriately
+```ts
+  addPlanet() {
+    const planet: Planet = {
+      name: 'Earth',
+      avgTemp: '65',
+      habitable: 'yes'
+    }
+    this.planetRepository.addPlanet(planet).subscribe()
   }
-});
-```
+  ```
 
-## Performance Considerations
+  So the problem here is we can't use an _async_ pipe to subscribe and unsubscribe.  
 
-### **1. Efficient Querying**
+  Using a subject with the _takeUntil_ pipe also has faults.
 
-Ensure that your GraphQL queries and subscriptions are optimized to reduce the load on your server and client. Fetch only the data you need and avoid excessively large payloads.
+  Let's refactor the [PlanetComponent](./src/app/planet//planet.component.ts) to include a subject that we can leverage for ensuring subscriptions are destroyed.
 
-### **2. Optimize Rendering**
 
-When working with frequently updating data, consider using change detection strategies to optimize rendering. Angular’s `OnPush` change detection strategy can be particularly effective in scenarios with large datasets or frequent updates.
-
-Example:
-
-```typescript
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+```ts
 
 @Component({
-  selector: 'app-optimized-data',
-  templateUrl: './optimized-data.component.html',
-  changeDetection: ChangeDetectionStrategy.OnPush
+  selector: 'app-planet',
+  standalone: true,
+  imports: [
+    CommonModule
+  ],
+  templateUrl: './planet.component.html',
+  styleUrl: './planet.component.scss'
 })
-export class OptimizedDataComponent {
-  // Your component logic
+export class PlanetComponent implements OnInit, OnDestroy {
+
+    private readonly destroy$ = new Subject<void>();
+
+    protected planets$: Observable<Planet[]> | null = null;
+
+    constructor(private planetRepository: PlanetRepositoryService) {
+
+    }
+  ngOnDestroy(): void {
+    this.destroy$.next();
+  }
+  ngOnInit(): void {
+    this.planets$ = this.planetRepository.getAllPlanets();
+  }
+
+  addPlanet() {
+    const planet: Planet = {
+      name: 'Earth',
+      avgTemp: '65',
+      habitable: 'yes'
+    }
+    this.planetRepository.addPlanet(planet)
+    .pipe(
+      takeUntil(this.destroy$)
+    )
+    .subscribe()
+  }
 }
 ```
 
-### **3. Caching**
+This is better - but still could result in multiple subscriptions.  If you click the add button more than once and never navigate away where the component will be destroyed - each click will result in a subscription.
 
-Leverage caching mechanisms provided by Apollo Client to reduce the number of requests sent to the server. This can improve performance and reduce costs.
+Recall the subscription **ALSO** includes a refetch.  Add 10 planets - the refetch will get called 10 times for each subscription.  
 
-```typescript
-import { InMemoryCache } from '@apollo/client/core';
+At least the subscriptions will be cleaned  up when the component is destroyed - keeping the memory leak from just building and building (consider leaving the app running for hours and navigating back and forth to this view).
 
-this.apollo.create({
-  link,
-  cache: new InMemoryCache()
-});
+One more additional step we can take is using the _take_ operator _in addtion to_ the _takeUntil_ operator.  
+
+Refactoring one more time:
+
+```ts
+  addPlanet() {
+    const planet: Planet = {
+      name: 'Earth',
+      avgTemp: '65',
+      habitable: 'yes'
+    }
+    this.planetRepository.addPlanet(planet)
+    .pipe(
+      take(1),
+      takeUntil(this.destroy$)
+    )
+    .subscribe()
+  }
 ```
 
-## Conclusion
+So now we are going to subscribe for only one emitted value.  The reason I leave the _takeUntil_ in place is a safety net.  
 
+Imagine a long running api call - mutation.  The server takes 20 seconds to respond and the user get's impatient and navigates away.
+
+This means the value would never have been emitted into the observable - our _take_ operator would never execute.  The subscription remains.
+
+Using both of these (and the order matters in the pipe operators) - we can safely subscribe to Apollo mutations that require multiple subscriptions while the component is instantiated. 
+
+# Conclusion
+
+GraphQL APIs are very popular.  All the cloud vendors have some form of GraphQL service (AWS arguably being the easiest to deploy with AppSync).  While it is true the React is certainly more popular to use with GraphQL - there are use cases where Angular is used.  
+
+The Apollo client offers an excellent tool to help that integration.  You just need to be aware of a few of the important aspects when it comes to managing subscriptions.  
